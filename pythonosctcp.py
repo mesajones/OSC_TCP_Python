@@ -342,10 +342,10 @@ class AsyncTCPClient:
         """
         async with self.message_lock:
             try:
-                if self.message_buffer:
-                    return self.message_buffer.pop(0)
-                else:
+                if not self.message_buffer:
                     return None, None
+                return self.message_buffer.pop(0)
+
             except IndexError:
                 return None, None
 

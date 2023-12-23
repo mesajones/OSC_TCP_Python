@@ -29,12 +29,14 @@ async def user_input_loop():
     while True:
         with patch_stdout():
             address = await asyncio.to_thread(session.prompt, "Address: ")
+            print("Prompting for arguments...")
             if address.lower() == 'exit':
                 await client.shutdown()
                 break
 
-            args = await asyncio.to_thread(session.prompt, "Arguments: ")
-            args = shlex.split(args)
+            args_input = await asyncio.to_thread(session.prompt, "Arguments: ")
+            args = shlex.split(args_input) if args_input.strip() else []
+
             # Convert args to the correct types as needed
             converted_args = []
             for arg in args:
@@ -45,7 +47,6 @@ async def user_input_loop():
                 else:
                     converted_args.append(arg)
 
-            print(f"converted args: {converted_args}")
             await client.add_message(address, *converted_args)
 
 
@@ -56,6 +57,8 @@ async def main():
     input_task = asyncio.create_task(user_input_loop())
 
     await asyncio.gather(client_task, input_task)
+
+    await client.add_message('/eos/reset')
 
 
 if __name__ == '__main__':
