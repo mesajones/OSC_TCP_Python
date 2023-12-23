@@ -2,7 +2,6 @@
 Created on Fri 22 Dec 2023:
 @author: carey chomsoonthorn
 """
-
 import struct
 import fnmatch
 import asyncio
@@ -49,7 +48,7 @@ def slip_decode(data):
             continue
         elif data[i] == SLIP_ESC:
             i += 1
-            if data [i] == SLIP_ESC_END:
+            if data[i] == SLIP_ESC_END:
                 decoded.append(SLIP_END)
             elif data[i] == SLIP_ESC_ESC:
                 decoded.append(SLIP_ESC)
@@ -133,6 +132,7 @@ def parse_osc_message(data):
         arguments = []
         current_pos = type_tag_end + 1 + (4 - type_tag_end % 4)
         for tag in type_tags:
+            value = None
             if tag == 'i':
                 (value,) = struct.unpack('>i', data[current_pos:current_pos + 4])
                 current_pos += 4
@@ -289,20 +289,25 @@ class AsyncTCPClient:
         self.message_lock = asyncio.Lock()
         self.reader = None
         self.writer = None
+        self.running = False
 
     async def connect(self):
         """
         Connect to the server.
         :return:
         """
-        self.reader, self.writer = await asyncio.open_connection(*self.server_address)
+        try:
+            self.reader, self.writer = await asyncio.open_connection(*self.server_address)
+        except Exception as e:
+            print(f"Could not connect to {self.server_address}: {e}")
+            raise
 
     async def add_message(self, message: str, *args: Tuple[Any, ...]):
         """
         Add a message to the message buffer.
         This is the main function for sending OSC messages
         to the server.
-        :param message:
+        :param message: OSC address, e.g., /example/1/2/fire
         :param args: Arguments that consist of a data-type and a type tag, e.g., (42, 'i')
         :return:
         """
@@ -314,7 +319,7 @@ class AsyncTCPClient:
         """
         Gets message from the message buffer.
         Used by the send_messages() function.
-        :return:
+        :return: A tuple containing the message and the arguments, else returning None, None
         """
         async with self.message_lock:
             try:
@@ -326,33 +331,45 @@ class AsyncTCPClient:
     async def send_messages(self):
         """
         Sends OSC messages from the buffer to the server.
-        Encodes the
+        Encodes the messages into a bytearray and then encodes it to SLIP protocol.
         :return:
         """
         if self.writer is None:
             raise ConnectionError("Not connected to server")
 
-        while True:
+        while self.running:
             message, args = await self.get_message()
             if message is None:
+                await asyncio.sleep(0.05)
                 continue
-            message_byte = create_osc_message(message, args)
-            slip_message = slip_encode(message_byte)
-            self.writer.write(slip_message)
-            await self.writer.drain()
+            try:
+                message_byte = create_osc_message(message, args)
+                slip_message = slip_encode(message_byte)
+                self.writer.write(slip_message)
+                await self.writer.drain()
+            except Exception as e:
+                print(f"Failed to send message: {e}")
+                raise
 
     async def listen(self):
         if self.reader is None:
             raise ConnectionError("Not connected to server")
 
-        while True:
-            data = await self.reader.read(1024)
-            if not data:
+        while self.running:
+            try:
+                data = await self.reader.read(1024)
+                if not data:
+                    break
+
+                decoded_data = slip_decode(data)
+                address, arguments = parse_osc_message(decoded_data)
+                if address is not None:
+                    await self.dispatcher.dispatch(address, arguments)
+            except asyncio.CancelledError:
                 break
-            decoded_data = slip_decode(data)
-            address, arguments = parse_osc_message(decoded_data)
-            if address is not None:
-                await self.dispatcher.dispatch(address, arguments)
+            except Exception as e:
+                print(f"Error while listening: {e}")
+                raise
 
     async def close(self):
         if self.writer:
@@ -360,6 +377,8 @@ class AsyncTCPClient:
             await self.writer.wait_closed()
 
     async def shutdown(self):
+        self.running = False
+
         tasks = [task for task in asyncio.all_tasks() if task is not asyncio.current_task()]
 
         for task in tasks:
@@ -372,6 +391,8 @@ class AsyncTCPClient:
     async def run(self):
         try:
             await self.connect()
+
+            self.running = True
 
             listen_task = asyncio.create_task(self.listen())
 
