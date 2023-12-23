@@ -13,6 +13,23 @@ SLIP_ESC_END = 0xDC
 SLIP_ESC_ESC = 0xDD
 
 
+def process_slip_message(buffer):
+    messages = []
+    while True:
+        if b'\xc0' in buffer:
+            end_idx = buffer.find(b'\xc0', 1) + 1
+            if end_idx > 1:
+                message = buffer[:end_idx]
+                messages.append(message)
+                buffer = buffer[end_idx:]
+            else:
+                # If a message starts but does not end, keep it in the buffer
+                break
+        else:
+            break
+    return messages, buffer
+
+
 def slip_encode(data):
     """
     Encode an OSC message into a SLIP-encoded byte-array.
@@ -71,6 +88,7 @@ def create_osc_message(address: str, *args: Any) -> bytes:
         osc_address = '/example'
         args = (42, 3.14, 'Hello, OSC!')
     """
+    print(f"Args received: {args}")
     if not address.startswith('/'):
         raise ValueError("OSC address must start with '/'")
 
@@ -80,6 +98,7 @@ def create_osc_message(address: str, *args: Any) -> bytes:
 
     arg_values = b''
     for arg, arg_type in zip(args, type_tags):
+        print(f"{arg}, {arg_type}")
         if arg_type == 'i':  # Integer
             arg_values += struct.pack('>i', arg)
         elif arg_type == 'f':  # Float
@@ -130,7 +149,7 @@ def parse_osc_message(data):
         type_tags = data[type_tag_start:type_tag_end].decode()
 
         arguments = []
-        current_pos = type_tag_end + 1 + (4 - type_tag_end % 4)
+        current_pos = type_tag_end + 1 + (4 - (type_tag_end + 1) % 4)
         for tag in type_tags:
             value = None
             if tag == 'i':
@@ -302,7 +321,7 @@ class AsyncTCPClient:
             print(f"Could not connect to {self.server_address}: {e}")
             raise
 
-    async def add_message(self, message: str, *args: Tuple[Any, ...]):
+    async def add_message(self, message: str, *args):
         """
         Add a message to the message buffer.
         This is the main function for sending OSC messages
@@ -311,7 +330,7 @@ class AsyncTCPClient:
         :param args: Arguments that consist of a data-type and a type tag, e.g., (42, 'i')
         :return:
         """
-        packed_message = message, args
+        packed_message = message, *args
         async with self.message_lock:
             self.message_buffer.append(packed_message)
 
@@ -323,8 +342,10 @@ class AsyncTCPClient:
         """
         async with self.message_lock:
             try:
-                message = self.message_buffer.pop(0)
-                return message
+                if self.message_buffer:
+                    return self.message_buffer.pop(0)
+                else:
+                    return None, None
             except IndexError:
                 return None, None
 
@@ -349,22 +370,29 @@ class AsyncTCPClient:
                 await self.writer.drain()
             except Exception as e:
                 print(f"Failed to send message: {e}")
-                raise
+                continue
 
     async def listen(self):
         if self.reader is None:
             raise ConnectionError("Not connected to server")
 
+        buffer = bytearray()
         while self.running:
             try:
                 data = await self.reader.read(1024)
                 if not data:
                     break
 
-                decoded_data = slip_decode(data)
-                address, arguments = parse_osc_message(decoded_data)
-                if address is not None:
-                    await self.dispatcher.dispatch(address, arguments)
+                # print(f"Raw data length: {len(data)}, content: {data}")
+
+                buffer.extend(data)
+                messages, buffer = process_slip_message(buffer)
+
+                for message in messages:
+                    decoded_message = slip_decode(message)
+                    address, arguments = parse_osc_message(decoded_message)
+                    if address is not None:
+                        await self.dispatcher.dispatch(address, arguments)
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -379,14 +407,13 @@ class AsyncTCPClient:
     async def shutdown(self):
         self.running = False
 
-        tasks = [task for task in asyncio.all_tasks() if task is not asyncio.current_task()]
+        await self.close()
 
+        tasks = [task for task in asyncio.all_tasks() if task is not asyncio.current_task()]
         for task in tasks:
             task.cancel()
 
         await asyncio.gather(*tasks, return_exceptions=True)
-
-        await self.close()
 
     async def run(self):
         try:
@@ -395,11 +422,8 @@ class AsyncTCPClient:
             self.running = True
 
             listen_task = asyncio.create_task(self.listen())
-
             send_task = asyncio.create_task(self.send_messages())
 
-            await listen_task
-            await send_task
-
+            await asyncio.gather(listen_task, send_task)
         except asyncio.CancelledError:
             pass

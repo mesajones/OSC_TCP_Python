@@ -2,6 +2,9 @@ import asyncio
 import shlex
 import configparser
 
+from prompt_toolkit import PromptSession
+from prompt_toolkit.patch_stdout import patch_stdout
+
 from pythonosctcp import Dispatcher, AsyncTCPClient
 
 
@@ -20,37 +23,39 @@ dispatcher.set_default_handler(handler)
 client = AsyncTCPClient(SERVER_ADDRESS, dispatcher)
 
 
-def parse_user_input():
-    address = input("Address: ")
-    if address.lower() == 'exit':
-        return 'exit', []
+async def user_input_loop():
+    session = PromptSession()
 
-    args_input = input("Arguments: ")
+    while True:
+        with patch_stdout():
+            address = await asyncio.to_thread(session.prompt, "Address: ")
+            if address.lower() == 'exit':
+                await client.shutdown()
+                break
 
-    args = []
-    for arg in shlex.split(args_input):
-        if arg.isdigit():
-            args.append(int(arg))
-        elif arg.replace('.', '', 1).isdigit():
-            args.append(float(arg))
-        else:
-            args.append(arg)
+            args = await asyncio.to_thread(session.prompt, "Arguments: ")
+            args = shlex.split(args)
+            # Convert args to the correct types as needed
+            converted_args = []
+            for arg in args:
+                if arg.isdigit():
+                    converted_args.append(int(arg))
+                elif arg.replace('.', '', 1).isdigit() and arg.count('.') == 1:
+                    converted_args.append(float(arg))
+                else:
+                    converted_args.append(arg)
 
-    return address, args
+            print(f"converted args: {converted_args}")
+            await client.add_message(address, *converted_args)
 
 
 async def main():
     await client.connect()
-    await client.run()
 
-    while True:
-        address, args = await asyncio.to_thread(parse_user_input)
-        if address == 'exit':
-            print("Shutting down...")
-            break
-        await client.add_message(address, *args)
+    client_task = asyncio.create_task(client.run())
+    input_task = asyncio.create_task(user_input_loop())
 
-    await client.shutdown()
+    await asyncio.gather(client_task, input_task)
 
 
 if __name__ == '__main__':
