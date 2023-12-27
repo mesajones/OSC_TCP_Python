@@ -11,7 +11,7 @@ from pythonosctcp import Dispatcher, AsyncTCPClient
 config = configparser.ConfigParser()
 config.read('config.ini')
 
-SERVER_ADDRESS = config['IPCONFIG']['target_ip'], int(config['IPCONFIG']['port'])
+SERVER_ADDRESS = config['NETWORK']['RX_IP'], int(config['NETWORK']['RX_PORT'])
 
 
 async def handler(address, *args):
@@ -45,7 +45,6 @@ async def user_input_loop():
                 else:
                     converted_args.append(arg)
 
-            print(f"converted args: {converted_args}")
             await client.add_message(address, *converted_args)
 
 
