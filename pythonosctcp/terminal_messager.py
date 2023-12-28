@@ -5,13 +5,13 @@ import configparser
 from prompt_toolkit import PromptSession
 from prompt_toolkit.patch_stdout import patch_stdout
 
-from pythonosctcp import Dispatcher, AsyncTCPClient
+from pythonosctcp.pythonosctcp import Dispatcher, AsyncTCPClient
 
 
 config = configparser.ConfigParser()
 config.read('config.ini')
 
-SERVER_ADDRESS = config['IPCONFIG']['target_ip'], int(config['IPCONFIG']['port'])
+SERVER_ADDRESS = config['NETWORK']['RX_IP'], int(config['NETWORK']['RX_PORT'])
 
 
 async def handler(address, *args):
