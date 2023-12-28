@@ -5,9 +5,11 @@ import re
 import threading
 
 import tkinter as tk
+from asyncio import Task
 from tkinter import scrolledtext, messagebox, font as f
 
 from datetime import datetime
+from typing import Any, Union, Tuple, Optional
 
 from pythonosctcp import Dispatcher, AsyncTCPClient
 
@@ -45,16 +47,16 @@ def on_close():
     tk_app_root.quit()
 
 
-def console_update(entry, underline=False, italic=False):
+def console_update(entry: str, underline: bool = False, italic: bool = False) -> None:
     gui.console_entry(entry, underline, italic)
 
 
-async def handle(address, *args):
+def handle(address: str, *args: Any) -> None:
     message = f"Received: {address}, {args}"
     loop.call_soon_threadsafe(console_update, message, False, True)
 
 
-def parse_element(element):
+def parse_element(element: str) -> Union[int, float, bool, str]:
     element = element.strip()
     try:
         return int(element)
@@ -77,7 +79,7 @@ def parse_element(element):
     return element
 
 
-def parse_user_input(loop, client, address, args_input):
+def parse_user_input(loop: asyncio.AbstractEventLoop, client: Any, address: str, args_input: str) -> None:
     global running
     try:
         if not address.startswith('/'):
@@ -99,7 +101,7 @@ def parse_user_input(loop, client, address, args_input):
         pass
 
 
-async def start_client(client, server_address=SERVER_ADDRESS):
+async def start_client(client: AsyncTCPClient, server_address: Tuple[str, int] = SERVER_ADDRESS) -> Optional[Task]:
     try:
         client_task = asyncio.create_task(client.run())
 
@@ -130,14 +132,14 @@ async def start_client(client, server_address=SERVER_ADDRESS):
         raise
 
 
-def validate_ip(ip):
+def validate_ip(ip: str) -> bool:
     # Regex for validating an IP address
     ip_regex = re.compile(r'^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$')
     return ip_regex.match(ip) is not None
 
 
 class NetworkErrorDialog(tk.Toplevel):
-    def __init__(self, parent, initial_ip="", initial_port=""):
+    def __init__(self, parent: tk.Tk, initial_ip: str = "", initial_port: str = "") -> None:
         super().__init__(parent)
         # Store the initial values
         self.title("Network Error: Please try different IP address and port")
@@ -375,7 +377,7 @@ class GUI:
             self.clear_confirm = False
 
     def on_entry_changed(self, name, index, mode):
-        if len(self.user_entry.get()) > 0:
+        if len(self.user_entry.get()) > 0 or self.current_prompt == arguments_prompt:
             self.send_indicator.config(state="normal")
         else:
             self.send_indicator.config(state="disabled")

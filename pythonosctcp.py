@@ -5,7 +5,7 @@ Created on Fri 22 Dec 2023:
 import struct
 import fnmatch
 import asyncio
-from typing import Tuple, Any
+from typing import Tuple, Any, Optional
 
 SLIP_END = 0xC0
 SLIP_ESC = 0xDB
@@ -13,7 +13,7 @@ SLIP_ESC_END = 0xDC
 SLIP_ESC_ESC = 0xDD
 
 
-def process_slip_message(buffer):
+def process_slip_message(buffer: bytes) -> (list, bytes):
     messages = []
     while True:
         if b'\xc0' in buffer:
@@ -30,7 +30,7 @@ def process_slip_message(buffer):
     return messages, buffer
 
 
-def slip_encode(data):
+def slip_encode(data: bytearray) -> bytearray:
     """
     Encode an OSC message into a SLIP-encoded byte-array.
     :param data:
@@ -51,11 +51,11 @@ def slip_encode(data):
     return encoded
 
 
-def slip_decode(data):
+def slip_decode(data: bytearray) -> bytearray:
     """
     Decoding a SLIP-encoded byte-array into an OSC message.
-    :param data:
-    :return:
+    :param data: slip encoded bytearray
+    :return decoded: bytearray of the decoded message
     """
     decoded = bytearray()
     i = 0
@@ -76,7 +76,7 @@ def slip_decode(data):
     return decoded
 
 
-def create_osc_message(address: str, *args) -> bytes:
+def create_osc_message(address: str, *args: Optional[Tuple[Any]]) -> bytes:
     """
     Create an OSC message from a string, automatically generating type tags.
 
