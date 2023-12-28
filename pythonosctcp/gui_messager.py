@@ -53,7 +53,7 @@ def console_update(entry: str, underline: bool = False, italic: bool = False) ->
     gui.console_entry(entry, underline, italic)
 
 
-def handle(address: str, *args: Any) -> None:
+async def handle(address: str, *args: Any) -> None:
     message = f"Received: {address}, {args}"
     loop.call_soon_threadsafe(console_update, message, False, True)
 
