@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="pythonosctcp",
-    version="0.1",
+    version="1",
     packages=find_packages(),
     install_requires=[],
     package_data={
