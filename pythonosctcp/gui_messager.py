@@ -13,7 +13,7 @@ from tkinter import scrolledtext, messagebox, font as f
 from datetime import datetime
 from typing import Any, Union, Tuple, Optional
 
-from pythonosctcp import Dispatcher, AsyncTCPClient
+from pythonosctcp.pythonosctcp import Dispatcher, AsyncTCPClient
 
 running = True
 

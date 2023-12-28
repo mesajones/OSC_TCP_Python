@@ -5,7 +5,7 @@ import configparser
 from prompt_toolkit import PromptSession
 from prompt_toolkit.patch_stdout import patch_stdout
 
-from pythonosctcp import Dispatcher, AsyncTCPClient
+from pythonosctcp.pythonosctcp import Dispatcher, AsyncTCPClient
 
 
 config = configparser.ConfigParser()
