@@ -272,11 +272,10 @@ class AsyncTCPClient:
         Connect to the server.
         :return:
         """
-        try:
-            self.reader, self.writer = await asyncio.open_connection(*self.server_address)
-        except Exception as e:
-            print(f"Could not connect to {self.server_address}: {e}")
-            raise
+        self.reader, self.writer = await asyncio.open_connection(*self.server_address)
+
+    def is_connected(self):
+        return self.reader is not None and self.writer is not None
 
     def alter_server_address(self, new_server_address: Tuple[str, int]):
         """ If you are in need of changing the address of the server """
@@ -365,8 +364,8 @@ class AsyncTCPClient:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                print(f"Error while listening: {e}")
-                raise
+                error = f"Error while listening: {e}"
+                raise Exception(error) from e
 
     async def close(self):
         if self.writer:
@@ -395,4 +394,6 @@ class AsyncTCPClient:
 
             await asyncio.gather(listen_task, send_task)
         except asyncio.CancelledError:
+            pass
+        except (OSError, ConnectionRefusedError):
             pass

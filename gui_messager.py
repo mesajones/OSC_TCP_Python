@@ -1,6 +1,5 @@
 import asyncio
 import configparser
-import errno
 import os
 import re
 import threading
@@ -46,13 +45,13 @@ def on_close():
     tk_app_root.quit()
 
 
-def console_update(entry):
-    gui.console_entry(entry)
+def console_update(entry, underline=False, italic=False):
+    gui.console_entry(entry, underline, italic)
 
 
 async def handle(address, *args):
     message = f"Received: {address}, {args}"
-    loop.call_soon_threadsafe(console_update, message)
+    loop.call_soon_threadsafe(console_update, message, False, True)
 
 
 def parse_element(element):
@@ -94,37 +93,41 @@ def parse_user_input(loop, client, address, args_input):
         try:
             asyncio.run_coroutine_threadsafe(client.add_message(address, *args), loop)
         except Exception as e:
-            console_update(e)
+            console_update(e, True)
     except ValueError as e:
-        console_update(e)
+        console_update(e, True)
         pass
 
 
-async def start_client(client):
-    client_started = False
-    server_address = SERVER_ADDRESS
+async def start_client(client, server_address=SERVER_ADDRESS):
+    try:
+        client_task = asyncio.create_task(client.run())
 
-    while not client_started:
-        try:
-            client_task = asyncio.create_task(client.run())
-            console_update(f"Client successfully connected to address {server_address}")
-            client_started = True
+        # Wait for a short period to allow connection to establish
+        await asyncio.sleep(1)  # Adjust the sleep duration as needed
+
+        if client.is_connected():
+            console_update(f"Client successfully connected to address {server_address}", True)
             return client_task
-        except OSError as e:
-            if e.errno == errno.EADDRINUSE:
-                new_address_future = gui.network_error_prompt()
-                new_address = await new_address_future
-                if new_address:
-                    server_address = new_address
-                    client.alter_server_address(server_address)
-                else:
-                    # Handle cancel
-                    return None
-            else:
-                raise  # Re-raise the exception if it's not errno 48
-        except Exception as e:
-            console_update(f"An error occurred: {e}")
-            raise
+        else:
+            raise ConnectionError(f"Error while connecting to {server_address}")
+
+    except (OSError, ConnectionRefusedError, ConnectionError) as e:
+        console_update(e, True)
+        console_update("Please try a different address/port.", True)
+        new_address_future = gui.network_error_prompt(server_address)
+        new_address = await new_address_future
+        if new_address[0] is not None or new_address[1] is not None:
+            server_address = new_address
+            client.alter_server_address(server_address)
+            return await start_client(client, server_address)  # Restart the connection process
+        else:
+            # Handle cancel
+            return None
+
+    except Exception as e:
+        console_update(f"An error occurred: {e}", True)
+        raise
 
 
 def validate_ip(ip):
@@ -133,15 +136,15 @@ def validate_ip(ip):
     return ip_regex.match(ip) is not None
 
 
-class BaseDialog(tk.Toplevel):
-    def __init__(self, parent, title=None):
+class NetworkErrorDialog(tk.Toplevel):
+    def __init__(self, parent, initial_ip="", initial_port=""):
         super().__init__(parent)
-        self.configure(background=BACKGROUND)
+        # Store the initial values
+        self.title("Network Error: Please try different IP address and port")
+        self.initial_ip = initial_ip
+        self.initial_port = initial_port
 
-        if title:
-            self.title(title)
-
-        self.frame = tk.Frame(self)
+        self.frame = tk.Frame(self, bg=BACKGROUND)
         self.frame.pack(expand=True, fill=tk.BOTH)
 
         # Make it modal
@@ -152,21 +155,8 @@ class BaseDialog(tk.Toplevel):
 
         self.initialize_dialog()  # Initialize dialog contents
 
-        self.wait_window()  # Wait for the dialog to close
-
-    def initialize_dialog(self):
-        # This method should be overridden by subclasses
-        pass
-
-    def on_cancel(self, event=None):
-        # Default cancel behavior
-        self.destroy()
-
-
-class NetworkErrorDialog(BaseDialog):
     def initialize_dialog(self):
         # Initialize the dialog contents here
-        self.title("Network Error 48: Port already in use")
 
         self.geometry("400x100")
 
@@ -176,21 +166,28 @@ class NetworkErrorDialog(BaseDialog):
 
         self.ip_entry = tk.Entry(self.frame, bg=BACKGROUND, foreground=FOREGROUND, font=default_font)
         self.ip_entry.grid(row=0, column=1, sticky="ew")
+        self.ip_entry.insert(0, self.initial_ip)
+        self.ip_entry.bind("<Return>", self.on_enter)
 
-        self.port_label = tk.Label(self.frame, text="Enter Port:", bg=BACKGROUND, foreground=FOREGROUND, font=default_font,
-                                   justify=tk.RIGHT)
+        self.port_label = tk.Label(self.frame, text="Enter Port:", bg=BACKGROUND, foreground=FOREGROUND,
+                                   font=default_font, justify=tk.RIGHT)
         self.port_label.grid(row=1, column=0)
 
         self.port_entry = tk.Entry(self.frame, bg=BACKGROUND, foreground=FOREGROUND, font=default_font)
         self.port_entry.grid(row=1, column=1, sticky="ew")
+        self.port_entry.insert(0, self.initial_port)
+        self.port_entry.bind("<Return>", self.on_enter)
 
         self.apply_button = tk.Button(self.frame, text="Apply", command=self.on_apply, bg=BACKGROUND,
-                                      font=default_font)
+                                      foreground=FOREGROUND, font=default_font)
         self.apply_button.grid(row=2, column=0)
 
-        self.cancel_button = tk.Button(self.frame, text="Cancel", command=self.on_cancel,
-                                       font=default_font)
+        self.cancel_button = tk.Button(self.frame, text="Cancel", command=self.on_cancel, bg=BACKGROUND,
+                                       foreground=FOREGROUND, font=default_font)
         self.cancel_button.grid(row=2, column=1)
+
+    def on_enter(self, event):
+        self.on_apply()
 
     def on_apply(self):
         ip = self.ip_entry.get()
@@ -220,21 +217,26 @@ class NetworkErrorDialog(BaseDialog):
 
 
 async def main(loop, client, dispatcher):
-    console_update("Welcome to the OSC Messenger!")
+    console_update("Welcome to the OSC Messenger!", True)
     try:
         asyncio.set_event_loop(loop)
-        console_update("Main loop started.")
+        console_update("Main loop started.", True)
 
         # dispatcher
         dispatcher.set_default_handler(handle)
 
-        console_update("Dispatcher started.")
+        console_update("Dispatcher started.", True)
 
         # client
         client_task = await start_client(client)
+        if client_task is None:
+            console_update("No network settings applied. Shutting down...", True)
+            await asyncio.sleep(1)
+            on_close()
+            return
 
     except Exception as e:
-        console_update(e)
+        console_update(e, True)
         print(e)
         raise
 
@@ -242,7 +244,7 @@ async def main(loop, client, dispatcher):
         while running:
             await asyncio.sleep(1)
     finally:
-        console_update("Shutting down...")
+        console_update("Shutting down...", True)
         await client.shutdown()
         client_task.cancel()
 
@@ -265,6 +267,12 @@ class GUI:
         self.indicator_text = "Send", "Clear?"
 
         self.default_font = default_font
+        self.underline_font = f.Font(
+            underline=True, family=self.default_font.cget("family"), size=self.default_font.cget("size")
+        )
+        self.italic_font = f.Font(
+            slant="italic", family=self.default_font.cget("family"), size=(self.default_font.cget("size"))
+        )
 
         self.console = scrolledtext.ScrolledText(self.root,
                                                  wrap=tk.WORD,
@@ -272,6 +280,8 @@ class GUI:
                                                  font=self.default_font,
                                                  background=BACKGROUND, foreground=FOREGROUND
                                                  )
+        self.console.tag_configure('UNDERLINE', font=self.underline_font)
+        self.console.tag_configure('ITALIC', font=self.italic_font)
         self.console.pack(fill=tk.BOTH, expand=1, padx=5, pady=5)
 
         self.entry_frame = tk.Frame(root)
@@ -294,6 +304,8 @@ class GUI:
         self.user_entry.grid(row=0, column=1, sticky="ew")
         self.user_entry.bind("<Return>", self.on_enter_pressed)
         self.user_entry.bind("<Escape>", self.on_escape_pressed)
+        self.user_entry.bind("<FocusOut>", self.on_entry_focus_out)
+        self.user_entry.bind("<KeyPress>", self.on_entry_key_press)
 
         self.send_indicator = tk.Entry(
             self.entry_frame, background=BACKGROUND, foreground=FOREGROUND, font=self.default_font, justify=tk.CENTER,
@@ -305,8 +317,16 @@ class GUI:
 
         self.new_entry_prompt(address_prompt)
 
-    def console_entry(self, entry):
-        self.console.insert(tk.END, f"{datetime.now().strftime("%H:%M:%S")} {entry}\n")
+    def console_entry(self, entry, is_underline=False, is_italic=False):
+        underline = 'UNDERLINE' if is_underline else ''
+        italic = 'ITALIC' if is_italic else ''
+        if not is_italic and not is_underline:
+            self.console.insert(tk.END, f"{datetime.now().strftime("%H:%M:%S")} {entry}\n")
+        elif is_underline:
+            self.console.insert(tk.END, f"{datetime.now().strftime("%H:%M:%S")} {entry}\n", underline)
+        elif is_italic:
+            self.console.insert(tk.END, f"{datetime.now().strftime("%H:%M:%S")} {entry}\n", italic)
+
         self.console.see(tk.END)
 
     def new_entry_prompt(self, new_prompt):
@@ -342,15 +362,16 @@ class GUI:
             self.send_indicator.config(state="normal")
             self.send_indicator.delete(0, tk.END)
             self.send_indicator.insert(tk.END, self.indicator_text[1])
+            self.send_indicator.config(state="disabled")
             self.clear_confirm = True
         else:
             self.address_string = ''
             self.args = None
             self.new_entry_prompt(address_prompt)
+            self.send_indicator.config(state="normal")
             self.send_indicator.delete(0, tk.END)
             self.send_indicator.insert(tk.END, self.indicator_text[0])
             self.send_indicator.config(state="disabled")
-
             self.clear_confirm = False
 
     def on_entry_changed(self, name, index, mode):
@@ -359,11 +380,32 @@ class GUI:
         else:
             self.send_indicator.config(state="disabled")
 
-    def network_error_prompt(self):
-        future = asyncio.Future()
+    def on_entry_focus_out(self, event):
+        """Handle the entry losing focus."""
+        self.reset_clear_confirm()
 
-        def open_dialog():
-            dialog = NetworkErrorDialog(self.root)
+    def on_entry_key_press(self, event):
+        """Handle the entry keypress."""
+        if event.keysym not in ["Return", "Escape"]:
+            self.reset_clear_confirm()
+
+    def reset_clear_confirm(self):
+        """Reset the clear confirmation state"""
+        if self.clear_confirm:
+            self.send_indicator.config(state="normal")
+            self.send_indicator.delete(0, tk.END)
+            self.send_indicator.insert(tk.END, self.indicator_text[0])
+            self.send_indicator.config(state="disabled")
+            self.clear_confirm = False
+
+    def network_error_prompt(self, server_address):
+        future = asyncio.Future()
+        ip, port = server_address
+
+        def open_dialog(ip, port):
+            dialog = NetworkErrorDialog(self.root, initial_ip=ip, initial_port=str(port))
+            self.root.wait_window(dialog)
+
             result = dialog.result
             if result:
                 ip, port = result
@@ -371,7 +413,7 @@ class GUI:
             else:
                 future.set_result((None, None))
 
-        self.loop.call_soon_threadsafe(open_dialog)
+        self.loop.call_soon_threadsafe(open_dialog, ip, port)
 
         return future
 
@@ -394,8 +436,8 @@ if __name__ == '__main__':
     font_size = 12
     if font_family not in available_fonts:
         print("fuck")
-        font_family = "Cascadia Mono"
-        font_size = 11
+        font_family = "Source Code Pro"
+        font_size = 13
         if font_family not in available_fonts:
             print("fuck")
             font_family = "Monaco"
