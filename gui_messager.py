@@ -1,3 +1,5 @@
+"""OSC Messager with GUI using TCP connection and AsyncIO"""
+
 import asyncio
 import configparser
 import os
