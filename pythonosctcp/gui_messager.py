@@ -5,11 +5,12 @@ import configparser
 import os
 import re
 import threading
+import sys
 
 import tkinter as tk
 from asyncio import Task
 from tkinter import scrolledtext, messagebox, font as f
-
+from pathlib import Path
 from datetime import datetime
 from typing import Any, Union, Tuple, Optional
 
@@ -19,20 +20,32 @@ running = True
 
 DEFAULT_SETTINGS = "127.0.0.1", 8000
 
+
+def get_config_path():
+    # Path to the user's home directory
+    home_dir = Path.home()
+    # Subdirectory for your application (change 'MyApp' to your app's name)
+    app_dir = home_dir / '.OSCTCPMessager'
+    # Ensure the application's directory exists
+    app_dir.mkdir(exist_ok=True)
+    print(app_dir)
+    # Path to the config file
+    return app_dir / 'config.ini'
+
+
+config_path = get_config_path()
 config = configparser.ConfigParser()
-if not os.path.exists('config.ini'):
+if not os.path.exists(config_path):
     print('config.ini not found, creating with default settings.')
     config['NETWORK'] = {
         'RX_IP': DEFAULT_SETTINGS[0],
-        'RX_PORT': int(DEFAULT_SETTINGS[1]),
-        'TX_IP': DEFAULT_SETTINGS[0],
-        'TX_PORT': int(DEFAULT_SETTINGS[1])
+        'RX_PORT': int(DEFAULT_SETTINGS[1])
     }
-    with open('config.ini', 'w') as configfile:
+    with open(config_path, 'w') as configfile:
         config.write(configfile)
 else:
     # Read the existing config file
-    config.read('config.ini')
+    config.read(config_path)
 
 SERVER_ADDRESS = config.get('NETWORK', 'RX_IP'), int(config.get('NETWORK', 'RX_PORT'))
 
@@ -41,6 +54,15 @@ arguments_prompt = "Arguments: "
 
 FOREGROUND = "#FCFCFA"
 BACKGROUND = "#2D2A2E"
+
+
+def update_settings():
+    config['NETWORK'] = {
+        'RX_IP': SERVER_ADDRESS[0],
+        'RX_PORT': str(SERVER_ADDRESS[1])
+    }
+    with open('config.ini', 'w') as c:
+        config.write(c)
 
 
 def on_close():
@@ -104,6 +126,7 @@ def parse_user_input(loop: asyncio.AbstractEventLoop, client: Any, address: str,
 
 
 async def start_client(client: AsyncTCPClient, server_address: Tuple[str, int] = SERVER_ADDRESS) -> Optional[Task]:
+    global SERVER_ADDRESS
     try:
         client_task = asyncio.create_task(client.run())
 
@@ -123,6 +146,7 @@ async def start_client(client: AsyncTCPClient, server_address: Tuple[str, int] =
         new_address = await new_address_future
         if new_address[0] is not None or new_address[1] is not None:
             server_address = new_address
+            SERVER_ADDRESS = server_address
             client.alter_server_address(server_address)
             return await start_client(client, server_address)  # Restart the connection process
         else:
@@ -464,3 +488,5 @@ if __name__ == '__main__':
 
     loop.call_soon_threadsafe(loop.stop)
     asyncio_thread.join()
+
+    update_settings()
