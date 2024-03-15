@@ -5,7 +5,6 @@ import configparser
 import os
 import re
 import threading
-import sys
 
 import tkinter as tk
 from asyncio import Task

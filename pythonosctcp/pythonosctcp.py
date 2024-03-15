@@ -5,7 +5,7 @@ Created on Fri 22 Dec 2023:
 import struct
 import fnmatch
 import asyncio
-from typing import Tuple, Any, Optional
+from typing import Tuple, Any, Optional, List
 
 SLIP_END = 0xC0
 SLIP_ESC = 0xDB
@@ -181,7 +181,7 @@ def parse_osc_message(data):
         return None, None
 
 
-def split_osc_message(address):
+def split_osc_message(address) -> List[str, ...]:
     """
     Split an OSC address into its components.
     :param address:
@@ -397,3 +397,33 @@ class AsyncTCPClient:
             pass
         except (OSError, ConnectionRefusedError):
             pass
+
+
+class AsyncTCPServer:
+    def __init__(self, host, port):
+        self.host = host
+        self.port = port
+        self.dispatcher = Dispatcher()
+
+    async def listen(self, reader, writer):
+        while True:
+            data = await reader.read(100)
+            if not data:
+                break  # Connection closed by client
+
+    async def start(self):
+        server = await asyncio.start_server(self.listen, self.host, self.port)
+        addr = server.sockets[0].getsockname()
+        print(f'Serving on {addr}')
+
+        async with server:
+            await server.serve_forever()
+
+
+class AsyncTCPRedirectingServer(AsyncTCPServer):
+    def __init__(self, host, port):
+        super().__init__(host, port)
+        self.connected_clients = {}  # Maps usernames to their (reader, writer) tuples
+
+    async def listen(self, reader, writer):
+        ...
