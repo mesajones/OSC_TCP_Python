@@ -181,7 +181,7 @@ def parse_osc_message(data):
         return None, None
 
 
-def split_osc_message(address) -> List[str, ...]:
+def split_osc_message(address):
     """
     Split an OSC address into its components.
     :param address:
@@ -251,6 +251,24 @@ class Dispatcher:
         if not asyncio.iscoroutinefunction(handler):
             raise TypeError('Default handler must be an async coroutine function.')
         self.default_handler = handler
+
+
+async def listen(reader, buffer, dispatcher):
+    data = await reader.read(1024)
+    if not data:
+        return False
+
+    buffer.extend(data)
+    messages, buffer = process_slip_message(buffer)
+
+    for message in messages:
+        decoded_message = slip_decode(message)
+        # print(f"Raw data length: {len(decoded_message)}, content: {decoded_message}")
+        address, arguments = parse_osc_message(decoded_message)
+        if address is not None:
+            await dispatcher.dispatch(address, arguments)
+
+    return True
 
 
 class AsyncTCPClient:
@@ -328,7 +346,7 @@ class AsyncTCPClient:
                 continue
             else:
                 if args is not None:
-                    message_byte = create_osc_message(message, args)
+                    message_byte = create_osc_message(message, *args)
                 else:
                     message_byte = create_osc_message(message)
                 try:
@@ -348,19 +366,9 @@ class AsyncTCPClient:
         buffer = bytearray()
         while self.running:
             try:
-                data = await self.reader.read(1024)
-                if not data:
+                success = await listen(self.reader, buffer, self.dispatcher)
+                if not success:
                     break
-
-                buffer.extend(data)
-                messages, buffer = process_slip_message(buffer)
-
-                for message in messages:
-                    decoded_message = slip_decode(message)
-                    # print(f"Raw data length: {len(decoded_message)}, content: {decoded_message}")
-                    address, arguments = parse_osc_message(decoded_message)
-                    if address is not None:
-                        await self.dispatcher.dispatch(address, arguments)
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -407,9 +415,16 @@ class AsyncTCPServer:
 
     async def listen(self, reader, writer):
         while True:
-            data = await reader.read(100)
-            if not data:
-                break  # Connection closed by client
+            buffer = bytearray()
+            try:
+                success = await listen(reader, buffer, self.dispatcher)
+                if not success:
+                    break
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                error = f"Error while listening: {e}"
+                raise Exception(error) from e
 
     async def start(self):
         server = await asyncio.start_server(self.listen, self.host, self.port)
@@ -423,7 +438,24 @@ class AsyncTCPServer:
 class AsyncTCPRedirectingServer(AsyncTCPServer):
     def __init__(self, host, port):
         super().__init__(host, port)
+
         self.connected_clients = {}  # Maps usernames to their (reader, writer) tuples
+        self.listen_tasks = {}  # maps username to task, e.g. self.listen_tasks[username] = task
+
+    async def handle_new_user(self, reader, writer):
+        if (reader, writer) not in self.connected_clients.values():
+            username = await self.query_username(reader, writer)
+            self.connected_clients[username] = (reader, writer)
+            # start new listen task for client
+            self.listen_tasks[username] = asyncio.create_task(self.listen(username))
 
     async def listen(self, reader, writer):
-        ...
+        await self.handle_new_user(reader, writer)
+        while True:
+            data = await reader.read(1024)
+            if not data:
+                break  # Connection closed by client
+            # do something with data
+
+    async def query_username(self, reader, writer) -> str:
+        pass
