@@ -76,42 +76,40 @@ def slip_decode(data: bytearray) -> bytearray:
     return decoded
 
 
-def create_osc_message(address: str, *args: Optional[Tuple[Any]]) -> bytes:
+def create_osc_message(address: str, *args) -> bytes:
     """
     Create an OSC message from a string, automatically generating type tags.
-
     :param address: OSC address, e.g., '/example'
     :param args: Variable-length arguments
     :return: OSC message as bytes
-
-    Example usage:
-        osc_address = '/example'
-        args = (42, 3.14, 'Hello, OSC!')
     """
     if not address.startswith('/'):
         raise ValueError("OSC address must start with '/'")
 
-    address = address + '\0' * (4 - len(address) % 4)
-    type_tags = ''.join(map(get_type_tag, args))
-    type_tag = ',' + type_tags + '\0' * (4 - (len(type_tags) + 1) % 4)
+    # Ensure address is null-terminated and padded to a multiple of 4 bytes
+    address_encoded = address.encode() + b'\x00'
+    address_encoded += b'\x00' * ((4 - len(address_encoded) % 4) % 4)
+
+    type_tags = ',' + ''.join(map(get_type_tag, args))
+    type_tag_encoded = type_tags.encode() + b'\x00'
+    type_tag_encoded += b'\x00' * ((4 - len(type_tag_encoded) % 4) % 4)
 
     arg_values = b''
-    if args is not None:
-        for arg, arg_type in zip(args, type_tags):
-            print(f"{arg}, {arg_type}")
-            if arg_type == 'i':  # Integer
-                arg_values += struct.pack('>i', arg)
-            elif arg_type == 'f':  # Float
-                arg_values += struct.pack('>f', arg)
-            elif arg_type == 's':  # String
-                padded_string = arg + '\0' * (4 - len(arg) % 4)
-                arg_values += padded_string.encode()
-            elif arg_type == 'T':
-                arg_values += b'T'
-            elif arg_type == 'F':
-                arg_values += b'F'
+    for arg in args:
+        if isinstance(arg, int):
+            arg_values += struct.pack('>i', arg)
+        elif isinstance(arg, float):
+            arg_values += struct.pack('>f', arg)
+        elif isinstance(arg, str):
+            arg_str_encoded = arg.encode() + b'\x00'
+            arg_str_encoded += b'\x00' * ((4 - len(arg_str_encoded) % 4) % 4)
+            arg_values += arg_str_encoded
+        elif isinstance(arg, bool):
+            # OSC does not have a specific boolean type, using 0 for False, 1 for True as an example
+            arg_values += struct.pack('>i', 1 if arg else 0)
+        # Add more type handling as needed
 
-    return address.encode() + type_tag.encode() + arg_values
+    return address_encoded + type_tag_encoded + arg_values
 
 
 def get_type_tag(arg: Any) -> str:
@@ -309,7 +307,7 @@ class AsyncTCPClient:
         :return:
         """
         if args:
-            packed_message = message, *args
+            packed_message = message, args
         else:
             packed_message = message, None
         async with self.message_lock:

@@ -13,7 +13,7 @@ from pathlib import Path
 from datetime import datetime
 from typing import Any, Union, Tuple, Optional
 
-from pythonosctcp.pythonosctcp import Dispatcher, AsyncTCPClient
+from pythonosctcp import Dispatcher, AsyncTCPClient
 
 running = True
 
