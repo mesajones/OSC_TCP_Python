@@ -345,8 +345,8 @@ class AsyncTCPClient:
         if self.reader is None:
             raise ConnectionError("Not connected to server")
 
-        buffer = bytearray()
         while self.running:
+            buffer = bytearray()
             try:
                 data = await self.reader.read(1024)
                 if not data:

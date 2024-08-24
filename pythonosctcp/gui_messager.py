@@ -5,7 +5,6 @@ import configparser
 import os
 import re
 import threading
-import sys
 
 import tkinter as tk
 from asyncio import Task
@@ -14,7 +13,7 @@ from pathlib import Path
 from datetime import datetime
 from typing import Any, Union, Tuple, Optional
 
-from pythonosctcp.pythonosctcp import Dispatcher, AsyncTCPClient
+from pythonosctcp import Dispatcher, AsyncTCPClient
 
 running = True
 
@@ -75,7 +74,7 @@ def console_update(entry: str, underline: bool = False, italic: bool = False) ->
     gui.console_entry(entry, underline, italic)
 
 
-async def handle(address: str, *args: Any) -> None:
+async def handle(address: str, args: Any) -> None:
     message = f"Received: {address}, {args}"
     loop.call_soon_threadsafe(console_update, message, False, True)
 
