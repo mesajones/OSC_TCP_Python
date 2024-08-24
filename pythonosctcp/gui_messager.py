@@ -206,11 +206,11 @@ class NetworkErrorDialog(tk.Toplevel):
         self.port_entry.bind("<Return>", self.on_enter)
 
         self.apply_button = tk.Button(self.frame, text="Apply", command=self.on_apply, bg=BACKGROUND,
-                                      foreground=FOREGROUND, font=default_font)
+                                      foreground=BACKGROUND, font=default_font)
         self.apply_button.grid(row=2, column=0)
 
         self.cancel_button = tk.Button(self.frame, text="Cancel", command=self.on_cancel, bg=BACKGROUND,
-                                       foreground=FOREGROUND, font=default_font)
+                                       foreground=BACKGROUND, font=default_font)
         self.cancel_button.grid(row=2, column=1)
 
     def on_enter(self, event):
@@ -470,7 +470,7 @@ if __name__ == '__main__':
             font_family = "Monaco"
             if font_family not in available_fonts:
                 print("fuck")
-                font_family = "Consolas"
+                font_family = "Aptos"
                 if font_family not in available_fonts:
                     print("fuckfuckfuck")
     default_font = f.Font(family=font_family, size=font_size)

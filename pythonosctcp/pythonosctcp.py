@@ -5,7 +5,7 @@ Created on Fri 22 Dec 2023:
 import struct
 import fnmatch
 import asyncio
-from typing import Tuple, Any, Optional
+from typing import Tuple, Any, Optional, List
 
 SLIP_END = 0xC0
 SLIP_ESC = 0xDB
@@ -76,42 +76,40 @@ def slip_decode(data: bytearray) -> bytearray:
     return decoded
 
 
-def create_osc_message(address: str, *args: Optional[Tuple[Any]]) -> bytes:
+def create_osc_message(address: str, *args) -> bytes:
     """
     Create an OSC message from a string, automatically generating type tags.
-
     :param address: OSC address, e.g., '/example'
     :param args: Variable-length arguments
     :return: OSC message as bytes
-
-    Example usage:
-        osc_address = '/example'
-        args = (42, 3.14, 'Hello, OSC!')
     """
     if not address.startswith('/'):
         raise ValueError("OSC address must start with '/'")
 
-    address = address + '\0' * (4 - len(address) % 4)
-    type_tags = ''.join(map(get_type_tag, args))
-    type_tag = ',' + type_tags + '\0' * (4 - (len(type_tags) + 1) % 4)
+    # Ensure address is null-terminated and padded to a multiple of 4 bytes
+    address_encoded = address.encode() + b'\x00'
+    address_encoded += b'\x00' * ((4 - len(address_encoded) % 4) % 4)
+
+    type_tags = ',' + ''.join(map(get_type_tag, args))
+    type_tag_encoded = type_tags.encode() + b'\x00'
+    type_tag_encoded += b'\x00' * ((4 - len(type_tag_encoded) % 4) % 4)
 
     arg_values = b''
-    if args is not None:
-        for arg, arg_type in zip(args, type_tags):
-            print(f"{arg}, {arg_type}")
-            if arg_type == 'i':  # Integer
-                arg_values += struct.pack('>i', arg)
-            elif arg_type == 'f':  # Float
-                arg_values += struct.pack('>f', arg)
-            elif arg_type == 's':  # String
-                padded_string = arg + '\0' * (4 - len(arg) % 4)
-                arg_values += padded_string.encode()
-            elif arg_type == 'T':
-                arg_values += b'T'
-            elif arg_type == 'F':
-                arg_values += b'F'
+    for arg in args:
+        if isinstance(arg, int):
+            arg_values += struct.pack('>i', arg)
+        elif isinstance(arg, float):
+            arg_values += struct.pack('>f', arg)
+        elif isinstance(arg, str):
+            arg_str_encoded = arg.encode() + b'\x00'
+            arg_str_encoded += b'\x00' * ((4 - len(arg_str_encoded) % 4) % 4)
+            arg_values += arg_str_encoded
+        elif isinstance(arg, bool):
+            # OSC does not have a specific boolean type, using 0 for False, 1 for True as an example
+            arg_values += struct.pack('>i', 1 if arg else 0)
+        # Add more type handling as needed
 
-    return address.encode() + type_tag.encode() + arg_values
+    return address_encoded + type_tag_encoded + arg_values
 
 
 def get_type_tag(arg: Any) -> str:
@@ -253,6 +251,24 @@ class Dispatcher:
         self.default_handler = handler
 
 
+async def listen(reader, buffer, dispatcher):
+    data = await reader.read(1024)
+    if not data:
+        return False
+
+    buffer.extend(data)
+    messages, buffer = process_slip_message(buffer)
+
+    for message in messages:
+        decoded_message = slip_decode(message)
+        # print(f"Raw data length: {len(decoded_message)}, content: {decoded_message}")
+        address, arguments = parse_osc_message(decoded_message)
+        if address is not None:
+            await dispatcher.dispatch(address, arguments)
+
+    return True
+
+
 class AsyncTCPClient:
     """
     A simple OSC TCP client aligned for asynchronous
@@ -291,7 +307,7 @@ class AsyncTCPClient:
         :return:
         """
         if args:
-            packed_message = message, *args
+            packed_message = message, args
         else:
             packed_message = message, None
         async with self.message_lock:
@@ -328,7 +344,7 @@ class AsyncTCPClient:
                 continue
             else:
                 if args is not None:
-                    message_byte = create_osc_message(message, args)
+                    message_byte = create_osc_message(message, *args)
                 else:
                     message_byte = create_osc_message(message)
                 try:
@@ -348,19 +364,9 @@ class AsyncTCPClient:
         while self.running:
             buffer = bytearray()
             try:
-                data = await self.reader.read(1024)
-                if not data:
+                success = await listen(self.reader, buffer, self.dispatcher)
+                if not success:
                     break
-
-                buffer.extend(data)
-                messages, buffer = process_slip_message(buffer)
-
-                for message in messages:
-                    decoded_message = slip_decode(message)
-                    # print(f"Raw data length: {len(decoded_message)}, content: {decoded_message}")
-                    address, arguments = parse_osc_message(decoded_message)
-                    if address is not None:
-                        await self.dispatcher.dispatch(address, arguments)
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -397,3 +403,57 @@ class AsyncTCPClient:
             pass
         except (OSError, ConnectionRefusedError):
             pass
+
+
+class AsyncTCPServer:
+    def __init__(self, host, port):
+        self.host = host
+        self.port = port
+        self.dispatcher = Dispatcher()
+
+    async def listen(self, reader, writer):
+        while True:
+            buffer = bytearray()
+            try:
+                success = await listen(reader, buffer, self.dispatcher)
+                if not success:
+                    break
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                error = f"Error while listening: {e}"
+                raise Exception(error) from e
+
+    async def start(self):
+        server = await asyncio.start_server(self.listen, self.host, self.port)
+        addr = server.sockets[0].getsockname()
+        print(f'Serving on {addr}')
+
+        async with server:
+            await server.serve_forever()
+
+
+class AsyncTCPRedirectingServer(AsyncTCPServer):
+    def __init__(self, host, port):
+        super().__init__(host, port)
+
+        self.connected_clients = {}  # Maps usernames to their (reader, writer) tuples
+        self.listen_tasks = {}  # maps username to task, e.g. self.listen_tasks[username] = task
+
+    async def handle_new_user(self, reader, writer):
+        if (reader, writer) not in self.connected_clients.values():
+            username = await self.query_username(reader, writer)
+            self.connected_clients[username] = (reader, writer)
+            # start new listen task for client
+            self.listen_tasks[username] = asyncio.create_task(self.listen(username))
+
+    async def listen(self, reader, writer):
+        await self.handle_new_user(reader, writer)
+        while True:
+            data = await reader.read(1024)
+            if not data:
+                break  # Connection closed by client
+            # do something with data
+
+    async def query_username(self, reader, writer) -> str:
+        pass
