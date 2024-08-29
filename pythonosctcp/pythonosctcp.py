@@ -211,7 +211,7 @@ class Dispatcher:
             raise TypeError('Handler must be an async coroutine function.')
 
         # init handler list if not yet init
-        if not self.handlers[address]:
+        if address not in self.handlers.keys():
             self.handlers[address] = []
 
         self.handlers[address].append(handler)
