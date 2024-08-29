@@ -202,14 +202,19 @@ class Dispatcher:
 
     def map(self, address, handler):
         """
-        Maps OSC messages to their corresponding handlers
+        Maps handlers to their corresponding OSC address
         :param address: OSC address to map, e.g., /example
         :param handler: Handler function for address
         :return:
         """
         if not asyncio.iscoroutinefunction(handler):
             raise TypeError('Handler must be an async coroutine function.')
-        self.handlers[address] = handler
+
+        # init handler list if not yet init
+        if not self.handlers[address]:
+            self.handlers[address] = []
+
+        self.handlers[address].append(handler)
 
     def unmap(self, address):
         """
@@ -232,12 +237,15 @@ class Dispatcher:
         :param args:
         :return:
         """
-        for pattern, handler in self.handlers.items():
+        handlers_found = False
+        for pattern, handlers in self.handlers.items():
             if fnmatch.fnmatch(address, pattern):
-                await handler(address, *args)
+                handlers_found = True
+                for handler in handlers:
+                    await handler(address, *args)
                 return
 
-        if self.default_handler:
+        if self.default_handler and not handlers_found:
             await self.default_handler(address, *args)
 
     def set_default_handler(self, handler):
